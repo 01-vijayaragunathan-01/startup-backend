@@ -51,10 +51,16 @@ export const getRecentContacts = async (req, res) => {
     const contactsMap = new Map();
 
     for (const msg of messages) {
+      // Skip message if sender or receiver is null (possible if user was deleted)
+      if (!msg.sender || !msg.receiver) continue;
+
       const otherUser =
         msg.sender._id.toString() === userId
           ? msg.receiver
           : msg.sender;
+
+      // Skip if still null (extra safety)
+      if (!otherUser || !otherUser._id) continue;
 
       if (!contactsMap.has(otherUser._id.toString())) {
         contactsMap.set(otherUser._id.toString(), otherUser);
@@ -64,6 +70,7 @@ export const getRecentContacts = async (req, res) => {
     const recentContacts = Array.from(contactsMap.values());
     res.status(200).json(recentContacts);
   } catch (err) {
+    console.error("getRecentContacts error:", err);
     res.status(500).json({ message: "Failed to fetch recent contacts" });
   }
 };
