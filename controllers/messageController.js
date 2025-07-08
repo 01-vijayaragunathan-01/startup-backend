@@ -40,7 +40,6 @@ export const saveMessage = async (req, res) => {
 export const getRecentContacts = async (req, res) => {
   try {
     const userId = req.user._id.toString();
-    console.log("📥 Fetching recent contacts for:", userId);
 
     const messages = await Message.find({
       $or: [{ sender: userId }, { receiver: userId }],
@@ -53,25 +52,21 @@ export const getRecentContacts = async (req, res) => {
 
     for (const msg of messages) {
       const otherUser =
-        msg.sender._id.toString() === userId
+        msg.sender?._id?.toString() === userId
           ? msg.receiver
           : msg.sender;
 
-      if (!otherUser || !otherUser.name) {
-        console.log("⚠️ Skipping message due to missing user:", msg);
-        continue;
-      }
+      // Skip if otherUser is missing (likely deleted)
+      if (!otherUser || !otherUser._id || !otherUser.name) continue;
 
-      if (!contactsMap.has(otherUser._id.toString())) {
-        contactsMap.set(otherUser._id.toString(), otherUser);
-      }
+      contactsMap.set(otherUser._id.toString(), otherUser);
     }
 
     const recentContacts = Array.from(contactsMap.values());
-    console.log("✅ Recent contacts:", recentContacts);
     res.status(200).json(recentContacts);
   } catch (err) {
     console.error("❌ Error in getRecentContacts:", err);
     res.status(500).json({ message: "Failed to fetch recent contacts" });
   }
 };
+
