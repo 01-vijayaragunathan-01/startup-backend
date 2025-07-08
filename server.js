@@ -14,15 +14,24 @@ import uploadRoutes from "./routes/uploadRoutes.js";
 import messageRoutes from "./routes/messageRoutes.js";
 import resourceRoutes from "./routes/resourceRoutes.js";
 
-
+// Load environment variables
 dotenv.config();
 connectDB();
 
 const app = express();
 const server = http.createServer(app);
+
+// Use client URL from .env or fallback
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
 
-// Socket.io setup
+//Apply CORS early
+app.use(cors({
+  origin: CLIENT_URL,
+  credentials: true,
+}));
+app.use(express.json());
+
+//Socket.IO setup
 const io = new Server(server, {
   cors: {
     origin: CLIENT_URL,
@@ -33,31 +42,36 @@ const io = new Server(server, {
 
 const onlineUsers = new Map();
 
-io.on("connection", (socket) => {
-  console.log("New socket connected:", socket.id);
+//Expose io and onlineUsers to routes via middleware
+app.use((req, res, next) => {
+  req.io = io;
+  req.onlineUsers = onlineUsers;
+  next();
+});
 
-  // User joins
+// 🔌 Socket connection logic
+io.on("connection", (socket) => {
+  console.log(" New socket connected:", socket.id);
+
   socket.on("join", (userId) => {
     onlineUsers.set(userId, socket.id);
-    console.log(`User ${userId} joined as socket ${socket.id}`);
+    console.log(`User ${userId} joined with socket ${socket.id}`);
   });
 
-  // 🔄 Handle sending messages
   socket.on("sendMessage", ({ sender, receiver, text }) => {
     const receiverSocketId = onlineUsers.get(receiver);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("receiveMessage", { sender, text });
 
-      // 🔔 Send real-time notification
+      // Send notification
       io.to(receiverSocketId).emit("new_Notification", {
         type: "chat",
         from: sender,
-        text: "📩 You received a new message",
+        text: "You received a new message",
       });
     }
   });
 
-  // On disconnect
   socket.on("disconnect", () => {
     for (let [userId, socketId] of onlineUsers.entries()) {
       if (socketId === socket.id) {
@@ -69,23 +83,12 @@ io.on("connection", (socket) => {
   });
 });
 
-// Middleware to allow controllers to use io
-app.use((req, res, next) => {
-  req.io = io;
-  req.onlineUsers = onlineUsers;
-  next();
-});
-
-// Middlewares
-app.use(cors({ origin: CLIENT_URL, credentials: true }));
-app.use(express.json());
-
-// Test route
+// 🔗 Test route
 app.get("/", (req, res) => {
   res.send("API is running...");
 });
 
-// API routes
+// 🛣️ API routes
 app.use("/api/auth", authRoutes);
 app.use("/api/mentorship", mentorshipRoutes);
 app.use("/api/mentors", mentorRoutes);
@@ -94,8 +97,7 @@ app.use("/api/upload", uploadRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/resources", resourceRoutes);
 
-
-// Start server
+// 🚀 Start server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
