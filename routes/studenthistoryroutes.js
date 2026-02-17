@@ -7,7 +7,7 @@ import {
   upsertSemester,
   getAllStudentHistories,
 } from "../controllers/studenthistorycontroller.js";
-import { protect, roleGuard } from "../middleware/authMiddleware.js";
+import { protect, roleGuard } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
