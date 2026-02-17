@@ -1,43 +1,31 @@
 import StudentHistory from "../models/studentHistory.js";
-import User from "../models/User.js";
+import User from "../models/userModel.js"; 
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Resolves a target studentId from the request.
- *  - Student role: always their own id.
- *  - Mentor role: from req.params.studentId or req.body.studentId.
- */
 const resolveStudentId = (req) => {
   if (req.user.role === "student") return req.user._id;
   return req.params.studentId || req.body.studentId;
 };
 
-/**
- * Verifies the student user actually exists and has the "student" role.
- */
-const assertStudentExists = async (studentId) => {
-  const student = await User.findById(studentId);
-  if (!student || student.role !== "student") {
-    throw Object.assign(new Error("Student not found."), { status: 404 });
+
+const assertUserExists = async (userId) => {
+  if (!userId) {
+    throw Object.assign(new Error("Student ID is required."), { status: 400 });
   }
-  return student;
+  const user = await User.findById(userId);
+  if (!user) {
+    throw Object.assign(new Error("User not found."), { status: 404 });
+  }
+  return user;
 };
 
-// ─── Controllers ──────────────────────────────────────────────────────────────
-
-/**
- * GET /api/student-history/           → student fetches their own record
- * GET /api/student-history/:studentId → mentor fetches a specific student's record
- */
 export const getStudentHistory = async (req, res) => {
   try {
     const studentId = resolveStudentId(req);
-
-    await assertStudentExists(studentId);
+    await assertUserExists(studentId);
 
     const record = await StudentHistory.findOne({ student: studentId })
-      .populate("student", "name email role avatar")
+      .populate("student",      "name email role avatar")
       .populate("lastEditedBy", "name email role");
 
     if (!record) {
@@ -50,19 +38,12 @@ export const getStudentHistory = async (req, res) => {
   }
 };
 
-/**
- * POST /api/student-history/           → student creates their own record
- * POST /api/student-history/:studentId → mentor creates a record for a student
- *
- * Body: all StudentHistory fields (except student / lastEditedBy, those are set here)
- */
+
 export const createStudentHistory = async (req, res) => {
   try {
     const studentId = resolveStudentId(req);
+    await assertUserExists(studentId);
 
-    await assertStudentExists(studentId);
-
-    // Prevent duplicates
     const existing = await StudentHistory.findOne({ student: studentId });
     if (existing) {
       return res.status(409).json({
@@ -78,12 +59,12 @@ export const createStudentHistory = async (req, res) => {
     } = req.body;
 
     const record = await StudentHistory.create({
-      student: studentId,
+      student:      studentId,
       lastEditedBy: req.user._id,
       fullName, regNo, phoneNumber, dob, department, permanentAddress,
       guardians, schooling,
       skills, newAchievement, certificationLink,
-      semesters,
+      semesters: semesters || [],
     });
 
     return res.status(201).json({ success: true, data: record });
@@ -95,19 +76,11 @@ export const createStudentHistory = async (req, res) => {
   }
 };
 
-/**
- * PUT /api/student-history/           → student updates their own record
- * PUT /api/student-history/:studentId → mentor updates a specific student's record
- *
- * Supports partial updates – only sends changed fields.
- * Semester logic: replaces the entire semesters array when provided, so the
- * client should always send the complete array (mirrors your frontend state).
- */
+
 export const updateStudentHistory = async (req, res) => {
   try {
     const studentId = resolveStudentId(req);
-
-    await assertStudentExists(studentId);
+    await assertUserExists(studentId);
 
     const {
       fullName, regNo, phoneNumber, dob, department, permanentAddress,
@@ -116,21 +89,20 @@ export const updateStudentHistory = async (req, res) => {
       semesters,
     } = req.body;
 
-    // Build the update object – only include fields that were sent
+    // Only set fields that were actually sent
     const updatePayload = { lastEditedBy: req.user._id };
-
-    if (fullName         !== undefined) updatePayload.fullName         = fullName;
-    if (regNo            !== undefined) updatePayload.regNo            = regNo;
-    if (phoneNumber      !== undefined) updatePayload.phoneNumber      = phoneNumber;
-    if (dob              !== undefined) updatePayload.dob              = dob;
-    if (department       !== undefined) updatePayload.department       = department;
-    if (permanentAddress !== undefined) updatePayload.permanentAddress = permanentAddress;
-    if (guardians        !== undefined) updatePayload.guardians        = guardians;
-    if (schooling        !== undefined) updatePayload.schooling        = schooling;
-    if (skills           !== undefined) updatePayload.skills           = skills;
-    if (newAchievement   !== undefined) updatePayload.newAchievement   = newAchievement;
+    if (fullName          !== undefined) updatePayload.fullName          = fullName;
+    if (regNo             !== undefined) updatePayload.regNo             = regNo;
+    if (phoneNumber       !== undefined) updatePayload.phoneNumber       = phoneNumber;
+    if (dob               !== undefined) updatePayload.dob               = dob;
+    if (department        !== undefined) updatePayload.department        = department;
+    if (permanentAddress  !== undefined) updatePayload.permanentAddress  = permanentAddress;
+    if (guardians         !== undefined) updatePayload.guardians         = guardians;
+    if (schooling         !== undefined) updatePayload.schooling         = schooling;
+    if (skills            !== undefined) updatePayload.skills            = skills;
+    if (newAchievement    !== undefined) updatePayload.newAchievement    = newAchievement;
     if (certificationLink !== undefined) updatePayload.certificationLink = certificationLink;
-    if (semesters        !== undefined) {
+    if (semesters         !== undefined) {
       if (semesters.length > 8) {
         return res.status(422).json({ message: "Maximum 8 semesters allowed." });
       }
@@ -142,7 +114,7 @@ export const updateStudentHistory = async (req, res) => {
       { $set: updatePayload },
       { new: true, runValidators: true }
     )
-      .populate("student", "name email role avatar")
+      .populate("student",      "name email role avatar")
       .populate("lastEditedBy", "name email role");
 
     if (!record) {
@@ -160,15 +132,10 @@ export const updateStudentHistory = async (req, res) => {
   }
 };
 
-/**
- * DELETE /api/student-history/           → student deletes their own record
- * DELETE /api/student-history/:studentId → mentor deletes a student's record
- */
 export const deleteStudentHistory = async (req, res) => {
   try {
     const studentId = resolveStudentId(req);
-
-    const record = await StudentHistory.findOneAndDelete({ student: studentId });
+    const record    = await StudentHistory.findOneAndDelete({ student: studentId });
 
     if (!record) {
       return res.status(404).json({ message: "No history record found." });
@@ -180,44 +147,30 @@ export const deleteStudentHistory = async (req, res) => {
   }
 };
 
-// ─── Semester-level helpers (mentor or student) ───────────────────────────────
-
-/**
- * PATCH /api/student-history/semester
- * PATCH /api/student-history/:studentId/semester
- *
- * Adds a new semester OR updates an existing one by semesterNumber.
- * Body: { semesterNumber, gpa, subjects }
- */
 export const upsertSemester = async (req, res) => {
   try {
     const studentId = resolveStudentId(req);
     const { semesterNumber, gpa, subjects } = req.body;
 
     if (!semesterNumber || semesterNumber < 1 || semesterNumber > 8) {
-      return res.status(422).json({ message: "semesterNumber must be between 1 and 8." });
+      return res.status(422).json({ message: "semesterNumber must be 1–8." });
     }
 
-    // Check if this semester slot is already present
     const record = await StudentHistory.findOne({ student: studentId });
     if (!record) {
       return res.status(404).json({ message: "No history record found." });
     }
 
-    const existingIndex = record.semesters.findIndex(
-      (s) => s.semesterNumber === semesterNumber
-    );
+    const idx = record.semesters.findIndex((s) => s.semesterNumber === semesterNumber);
 
-    if (existingIndex !== -1) {
-      // Update in-place
-      if (gpa      !== undefined) record.semesters[existingIndex].gpa      = gpa;
-      if (subjects  !== undefined) record.semesters[existingIndex].subjects  = subjects;
+    if (idx !== -1) {
+      if (gpa      !== undefined) record.semesters[idx].gpa      = gpa;
+      if (subjects !== undefined) record.semesters[idx].subjects = subjects;
     } else {
       if (record.semesters.length >= 8) {
         return res.status(422).json({ message: "Maximum 8 semesters already reached." });
       }
       record.semesters.push({ semesterNumber, gpa: gpa || "", subjects: subjects || [] });
-      // Keep sorted
       record.semesters.sort((a, b) => a.semesterNumber - b.semesterNumber);
     }
 
@@ -230,10 +183,7 @@ export const upsertSemester = async (req, res) => {
   }
 };
 
-/**
- * GET /api/student-history/all   → mentor-only: list all student history records
- * Supports pagination: ?page=1&limit=20
- */
+
 export const getAllStudentHistories = async (req, res) => {
   try {
     const page  = Math.max(1, parseInt(req.query.page)  || 1);
@@ -251,9 +201,9 @@ export const getAllStudentHistories = async (req, res) => {
     ]);
 
     return res.status(200).json({
-      success: true,
+      success:    true,
       pagination: { total, page, limit, pages: Math.ceil(total / limit) },
-      data: records,
+      data:       records,
     });
   } catch (err) {
     return res.status(500).json({ message: err.message });
