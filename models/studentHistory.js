@@ -1,11 +1,10 @@
 import mongoose from "mongoose";
 
-
 const subjectSchema = new mongoose.Schema(
   {
     code:  { type: String, default: "" },
     name:  { type: String, default: "" },
-    marks: { type: String, default: "" }, 
+    marks: { type: String, default: "" },
   },
   { _id: false }
 );
@@ -21,9 +20,9 @@ const semesterSchema = new mongoose.Schema(
 
 const schoolingSchema = new mongoose.Schema(
   {
-    highSchoolName:       { type: String, default: "" }, // 10th
-    highSchoolPercentage: { type: String, default: "" },
-    higherSecondaryName:  { type: String, default: "" }, // 12th
+    highSchoolName:            { type: String, default: "" },
+    highSchoolPercentage:      { type: String, default: "" },
+    higherSecondaryName:       { type: String, default: "" },
     higherSecondaryPercentage: { type: String, default: "" },
   },
   { _id: false }
@@ -31,24 +30,30 @@ const schoolingSchema = new mongoose.Schema(
 
 const guardianSchema = new mongoose.Schema(
   {
-    fatherName:       { type: String, default: "" },
-    fatherOccupation: { type: String, default: "" },
-    motherName:       { type: String, default: "" },
-    motherOccupation: { type: String, default: "" },
+    fatherName:         { type: String, default: "" },
+    fatherOccupation:   { type: String, default: "" },
+    fatherPhoto:        { type: String, default: "" }, // Base64
+    fatherAadhaar:      { type: String, default: "" },
+    fatherLicense:      { type: String, default: "" },
+    fatherAnnualIncome: { type: String, default: "" },
+    motherName:         { type: String, default: "" },
+    motherOccupation:   { type: String, default: "" },
+    motherPhoto:        { type: String, default: "" }, // Base64
+    motherAadhaar:      { type: String, default: "" },
+    motherLicense:      { type: String, default: "" },
+    motherAnnualIncome: { type: String, default: "" },
   },
   { _id: false }
 );
 
-// ─── Main Schema 
-
 const studentHistorySchema = new mongoose.Schema(
   {
-    // Reference to the User who owns this record
+    // ── FIX: matches your project's actual model filename ──────────────────────
     student: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref:  "User",
+      type:     mongoose.Schema.Types.ObjectId,
+      ref:      "User",
       required: true,
-      unique: true, // one record per student
+      unique:   true,
     },
 
     // 01 // IDENTITY
@@ -58,6 +63,11 @@ const studentHistorySchema = new mongoose.Schema(
     dob:              { type: Date },
     department:       { type: String, default: "" },
     permanentAddress: { type: String, default: "" },
+    bloodGroup:       { type: String, default: "" },
+    aadhaarNo:        { type: String, default: "" },
+    admissionNo:      { type: String, default: "" },
+    licenseNo:        { type: String, default: "" },
+    studentPhoto:     { type: String, default: "" }, // Base64
 
     // 02 // GUARDIANS
     guardians: { type: guardianSchema, default: () => ({}) },
@@ -70,17 +80,17 @@ const studentHistorySchema = new mongoose.Schema(
     newAchievement:    { type: String, default: "" },
     certificationLink: { type: String, default: "" },
 
-    // 05 // ACADEMIC LEDGER (semesters 1-8)
+    // 05 // ACADEMIC LEDGER
     semesters: {
-      type: [semesterSchema],
-      default: [],
+      type:     [semesterSchema],
+      default:  [],
       validate: {
         validator: (arr) => arr.length <= 8,
         message:   "Maximum 8 semesters allowed.",
       },
     },
 
-    // Audit – which mentor last touched this record
+    // Audit trail
     lastEditedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref:  "User",
@@ -89,7 +99,6 @@ const studentHistorySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// ─── Indexes ──────────────────────────────────────────────────────────────────
 studentHistorySchema.index({ student: 1 });
 
 const StudentHistory = mongoose.model("StudentHistory", studentHistorySchema);

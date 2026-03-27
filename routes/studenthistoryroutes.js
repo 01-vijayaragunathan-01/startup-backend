@@ -1,3 +1,4 @@
+// backend/routes/studenthistoryroutes.js
 import express from "express";
 import {
   getStudentHistory,
@@ -11,42 +12,38 @@ import { protect, roleGuard } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
+// Apply protection to ALL routes in this file
 router.use(protect);
 
+/**
+ * @description Admin/Mentor only: Fetch all records
+ */
 router.get("/all", roleGuard("mentor"), getAllStudentHistories);
 
+/**
+ * @description Standard Student/Mentor CRUD
+ * Mentors can pass ?studentId in the body or params depending on your controller logic
+ */
+router
+  .route("/")
+  .get(roleGuard("student", "mentor"), getStudentHistory)
+  .post(roleGuard("student", "mentor"), createStudentHistory)
+  .put(roleGuard("student", "mentor"), updateStudentHistory)
+  .delete(roleGuard("student", "mentor"), deleteStudentHistory);
 
-
-// GET /api/student-history
-router.get("/", roleGuard("student", "mentor"), getStudentHistory);
-
-// POST /api/student-history
-router.post("/", roleGuard("student", "mentor"), createStudentHistory);
-
-// PUT /api/student-history
-router.put("/", roleGuard("student", "mentor"), updateStudentHistory);
-
-// DELETE /api/student-history
-router.delete("/", roleGuard("student", "mentor"), deleteStudentHistory);
-
-// PATCH /api/student-history/semester
 router.patch("/semester", roleGuard("student", "mentor"), upsertSemester);
 
-// ─── Mentor routes with :studentId 
+/**
+ * @description Explicit Mentor-only routes for specific student IDs
+ * Note: Ensure your controller checks for req.params.studentId
+ */
+router
+  .route("/:studentId")
+  .get(roleGuard("mentor"), getStudentHistory)
+  .post(roleGuard("mentor"), createStudentHistory)
+  .put(roleGuard("mentor"), updateStudentHistory)
+  .delete(roleGuard("mentor"), deleteStudentHistory);
 
-// GET /api/student-history/:studentId
-router.get("/:studentId", roleGuard("mentor"), getStudentHistory);
-
-// POST /api/student-history/:studentId
-router.post("/:studentId", roleGuard("mentor"), createStudentHistory);
-
-// PUT /api/student-history/:studentId
-router.put("/:studentId", roleGuard("mentor"), updateStudentHistory);
-
-// DELETE /api/student-history/:studentId
-router.delete("/:studentId", roleGuard("mentor"), deleteStudentHistory);
-
-// PATCH /api/student-history/:studentId/semester
 router.patch("/:studentId/semester", roleGuard("mentor"), upsertSemester);
 
 export default router;
