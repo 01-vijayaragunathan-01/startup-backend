@@ -97,8 +97,7 @@ app.use("/api/profile", profileRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/resources", resourceRoutes);
-app.use("/api/history", studenthistoryroutes);
-
+app.use("/api/student-history", studenthistoryroutes);
 // 🚀 Start server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
