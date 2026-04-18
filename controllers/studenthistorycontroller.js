@@ -21,13 +21,13 @@ const assertUserExists = async (userId) => {
  */
 const assertMentorConnected = async (mentorId, studentId) => {
   const connection = await MentorshipRequest.findOne({
-    mentor: mentorId,
+    mentor:  mentorId,
     student: studentId,
-    status: "accepted",
+    status:  "accepted",
   });
   if (!connection) {
     throw Object.assign(
-      new Error("Access denied. You are not connected with this student."),
+      new Error("Access denied. You are not connected with this student. Student must accept your connection first."),
       { status: 403 }
     );
   }
