@@ -14,6 +14,7 @@ import uploadRoutes from "./routes/uploadRoutes.js";
 import messageRoutes from "./routes/messageRoutes.js";
 import resourceRoutes from "./routes/resourceRoutes.js";
 import studenthistoryroutes from "./routes/studenthistoryroutes.js";
+import courseRoutes         from "./routes/courseRoutes.js";
 
 // Load environment variables
 dotenv.config();
@@ -99,6 +100,7 @@ app.use("/api/upload", uploadRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/resources", resourceRoutes);
 app.use("/api/student-history", studenthistoryroutes);
+app.use("/api/courses",         courseRoutes);
 // 🚀 Start server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
