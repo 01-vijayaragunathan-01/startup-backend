@@ -13,8 +13,9 @@ const messageSchema = new mongoose.Schema(
       required: true,
     },
     text:      { type: String, default: "" },
-    imageUrl:  { type: String, default: "" },   // chat image (Cloudinary URL)
-    deletedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }], // soft-delete per user
+    imageUrl:  { type: String, default: "" },
+    read:      { type: Boolean, default: false },           // ← unread tracking
+    deletedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     timestamp: { type: Date, default: Date.now },
   },
   { timestamps: true }
