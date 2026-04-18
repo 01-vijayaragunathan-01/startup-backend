@@ -99,7 +99,5 @@ const studentHistorySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-studentHistorySchema.index({ student: 1 });
-
 const StudentHistory = mongoose.model("StudentHistory", studentHistorySchema);
 export default StudentHistory;
