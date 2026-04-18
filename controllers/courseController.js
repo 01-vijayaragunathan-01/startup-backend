@@ -22,8 +22,7 @@ export const addCourse = async (req, res) => {
     const isVideo = type === "video";
     const result  = await uploadToCloud(req.file.buffer, {
       folder:        "mentor_courses",
-      resource_type: isVideo ? "video" : "raw",
-      format:        isVideo ? undefined : "pdf",
+      resource_type: "auto",   // "auto" serves both video & PDF publicly; "raw" causes 401
     });
 
     const course = await Course.create({
