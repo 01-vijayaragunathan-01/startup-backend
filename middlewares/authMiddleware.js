@@ -5,26 +5,31 @@ import User from "../models/userModel.js";
 export const protect = async (req, res, next) => {
   let token;
 
+  // Primary: Bearer token in Authorization header
   if (
     req.headers.authorization &&
     req.headers.authorization.startsWith("Bearer")
   ) {
-    try {
-      token = req.headers.authorization.split(" ")[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    token = req.headers.authorization.split(" ")[1];
+  }
+  // Fallback: ?token= query param (used by window.open() for PDF streaming)
+  else if (req.query.token) {
+    token = req.query.token;
+  }
 
-      req.user = await User.findById(decoded.id).select("-password");
-      
-      if (!req.user) {
-        return res.status(401).json({ message: "User not found" });
-      }
-      
-      next();
-    } catch (error) {
-      return res.status(401).json({ message: "Not authorized, token failed" });
-    }
-  } else {
+  if (!token) {
     return res.status(401).json({ message: "Not authorized, no token" });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = await User.findById(decoded.id).select("-password");
+    if (!req.user) {
+      return res.status(401).json({ message: "User not found" });
+    }
+    next();
+  } catch (error) {
+    return res.status(401).json({ message: "Not authorized, token failed" });
   }
 };
 
