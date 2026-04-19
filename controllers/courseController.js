@@ -47,11 +47,13 @@ export const addCourse = async (req, res) => {
     if (!title || !type)
       return res.status(400).json({ message: "Title and type are required" });
 
-    const isPdf = type === "pdf";
-
+    const isPdf  = type === "pdf";
+    // For study materials (PDF, PPT, PPTX, DOC, DOCX etc.) use "auto" so Cloudinary
+    // detects the actual file type and stores it correctly.
+    // For videos, "auto" also works and falls through to video resource_type.
     const result = await uploadToCloud(req.file.buffer, {
       folder:        "mentor_courses",
-      resource_type: isPdf ? "image" : "auto",
+      resource_type: "auto",
     });
 
     // Store the public_id WITHOUT extension (how Cloudinary internally indexes it)
@@ -104,14 +106,23 @@ export const getPdfUrl = async (req, res) => {
     const publicId = rawId ? rawId.replace(/\.[^/.]+$/, "") : null;
     if (!publicId) return res.status(500).json({ message: "Cannot resolve public_id" });
 
-    // Detect resource type: raw (legacy uploads) vs image (new uploads)
+    // Detect resource type from the stored URL
+    // After switching to resource_type:"auto", all non-video study materials
+    // (PDF, PPT, DOC etc.) are stored as "raw" by Cloudinary.
     const isImageType =
       (course.resourceType && course.resourceType.startsWith("image")) ||
       course.fileUrl.includes("/image/upload/");
 
     const resourceType = isImageType ? "image" : "raw";
 
-    console.log(`[getPdfUrl] publicId="${publicId}" resourceType="${resourceType}" attachment=${attachment}`);
+    // Derive the file format from the original URL extension
+    // e.g. ".pdf" → "pdf", ".pptx" → "pptx", ".docx" → "docx"
+    const urlExt = course.fileUrl.split("?")[0].split(".").pop().toLowerCase();
+    const format = ["pdf","pptx","ppt","docx","doc","xlsx","xls"].includes(urlExt)
+      ? urlExt
+      : "pdf"; // fallback
+
+    console.log(`[getPdfUrl] publicId="${publicId}" resourceType="${resourceType}" format="${format}" attachment=${attachment}`);
 
     // private_download_url generates a signed Admin-API URL:
     //   https://api.cloudinary.com/v1_1/{cloud}/{resourceType}/download
@@ -123,7 +134,7 @@ export const getPdfUrl = async (req, res) => {
     // CRITICAL: Pass the public_id WITHOUT extension as first arg.
     //           Pass "pdf" as the format (second arg) — this is the extension.
     //           The SDK filters "" and undefined values, so format MUST be "pdf".
-    const url = cloudinary.utils.private_download_url(publicId, "pdf", {
+    const url = cloudinary.utils.private_download_url(publicId, format, {
       resource_type: resourceType,
       type:          "upload",
       attachment:    attachment,
