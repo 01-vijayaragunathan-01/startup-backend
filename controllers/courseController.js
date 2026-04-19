@@ -1,6 +1,8 @@
 import Course from "../models/courseModel.js";
 import MentorshipRequest from "../models/mentorshipModel.js";
 import cloudinary from "../config/cloudinary.js";
+import https from "https";
+import http from "http";
 
 // ── helper: upload buffer to Cloudinary ──────────────────────────────────────
 const uploadToCloud = (buffer, opts) =>
@@ -12,8 +14,9 @@ const uploadToCloud = (buffer, opts) =>
   });
 
 // ── helper: derive public_id from a stored Cloudinary URL ────────────────────
+// For RAW resources, the public_id INCLUDES the file extension (e.g. mentor_courses/abc.pdf)
 // e.g. https://res.cloudinary.com/<cloud>/raw/upload/v123/mentor_courses/abc.pdf
-//   => mentor_courses/abc   (without extension)
+//   => mentor_courses/abc.pdf   (keep extension for raw resources)
 const publicIdFromUrl = (url) => {
   try {
     const parts = new URL(url).pathname.split("/");
@@ -23,12 +26,28 @@ const publicIdFromUrl = (url) => {
     // skip version segment (starts with 'v' followed by digits)
     let rest = parts.slice(uploadIdx + 1);
     if (/^v\d+$/.test(rest[0])) rest = rest.slice(1);
-    const withExt = rest.join("/");
-    return withExt.replace(/\.[^/.]+$/, ""); // strip extension
+    // Keep extension — for raw resources the extension is part of the public_id
+    return rest.join("/");
   } catch {
     return null;
   }
 };
+
+// ── helper: fetch remote URL and pipe to Express response ────────────────────
+const pipeRemoteUrl = (remoteUrl, res) =>
+  new Promise((resolve, reject) => {
+    const lib = remoteUrl.startsWith("https") ? https : http;
+    lib.get(remoteUrl, (upstream) => {
+      if (upstream.statusCode !== 200) {
+        reject(new Error(`Upstream ${upstream.statusCode}`));
+        upstream.resume();
+        return;
+      }
+      upstream.pipe(res);
+      upstream.on("end", resolve);
+      upstream.on("error", reject);
+    }).on("error", reject);
+  });
 
 // ── MENTOR: Add a course (video or PDF) ──────────────────────────────────────
 export const addCourse = async (req, res) => {
@@ -67,31 +86,53 @@ export const addCourse = async (req, res) => {
   }
 };
 
-// ── SHARED: Get a short-lived signed URL for a PDF ────────────────────────────
-// GET /api/courses/:id/signed-url?disposition=inline|attachment
-export const getPdfSignedUrl = async (req, res) => {
+// ── SHARED: Stream a PDF through the backend (proxy) ─────────────────────────
+// GET /api/courses/:id/pdf-stream?disposition=inline|attachment
+//
+// Strategy: build a Cloudinary signed URL server-side using cloudinary.url()
+// with sign_url:true (works correctly for raw resources), then fetch that URL
+// on the server and pipe the bytes to the client. The browser never touches a
+// restricted Cloudinary endpoint directly, so 401 is impossible.
+export const streamPdf = async (req, res) => {
   try {
     const course = await Course.findById(req.params.id);
     if (!course) return res.status(404).json({ message: "Course not found" });
     if (course.type !== "pdf") return res.status(400).json({ message: "Not a PDF" });
 
     // Resolve the public_id — prefer stored value, fall back to URL parsing
+    // For raw resources the public_id INCLUDES the .pdf extension
     const publicId = course.publicId || publicIdFromUrl(course.fileUrl);
     if (!publicId) return res.status(500).json({ message: "Cannot determine public_id" });
 
     const disposition = req.query.disposition === "attachment" ? "attachment" : "inline";
+    const filename    = encodeURIComponent((course.title || "document") + ".pdf");
 
-    // Generate a signed URL valid for 5 minutes
-    const signedUrl = cloudinary.utils.private_download_url(publicId, "pdf", {
+    // Build a signed delivery URL valid for 5 minutes
+    // cloudinary.url() with sign_url:true handles raw resources correctly
+    const signedUrl = cloudinary.url(publicId, {
       resource_type: "raw",
-      attachment: disposition === "attachment",
-      expires_at: Math.floor(Date.now() / 1000) + 300, // 5 min
+      type:          "upload",
+      sign_url:      true,
+      secure:        true,
+      expires_at:    Math.floor(Date.now() / 1000) + 300,
     });
 
-    res.json({ success: true, url: signedUrl });
+    // Set response headers so the browser knows it's a PDF
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `${disposition}; filename="${filename}"`
+    );
+    // Allow the Netlify frontend to read the response
+    res.setHeader("Access-Control-Allow-Origin", "*");
+
+    // Pipe Cloudinary => client
+    await pipeRemoteUrl(signedUrl, res);
   } catch (err) {
-    console.error("getPdfSignedUrl error:", err);
-    res.status(500).json({ message: err.message });
+    console.error("streamPdf error:", err);
+    if (!res.headersSent) {
+      res.status(500).json({ message: err.message });
+    }
   }
 };
 

@@ -2,7 +2,7 @@ import express from "express";
 import multer from "multer";
 import {
   addCourse, updateCourse, deleteCourse,
-  getMentorCourses, getStudentCourses, getPdfSignedUrl,
+  getMentorCourses, getStudentCourses, streamPdf,
 } from "../controllers/courseController.js";
 import { protect } from "../middlewares/authMiddleware.js";
 
@@ -22,8 +22,8 @@ router.get(    "/my",  protect, getMentorCourses);
 // STUDENT — courses from all connected mentors
 router.get(    "/student", protect, getStudentCourses);
 
-// SHARED — get a short-lived signed URL for a PDF (view or download)
+// SHARED — stream a PDF through the backend proxy (view or download)
 // Must come before /:id to avoid route collision
-router.get(    "/:id/signed-url", protect, getPdfSignedUrl);
+router.get(    "/:id/pdf-stream", protect, streamPdf);
 
 export default router;
