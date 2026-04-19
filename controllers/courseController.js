@@ -11,31 +11,41 @@ const uploadToCloud = (buffer, opts) =>
     stream.end(buffer);
   });
 
-// ── helper: extract public_id from a Cloudinary URL ──────────────────────────
-// For RAW  resources the public_id INCLUDES the extension (e.g. mentor_courses/abc.pdf)
-// For IMAGE resources Cloudinary puts the extension at the end of the path too
+// ── helper: extract raw public_id (no extension) from a Cloudinary URL ───────
+//
+// Cloudinary ALWAYS stores public_id WITHOUT the file extension, even for raw
+// resources. The extension appears in the delivery URL but is NOT part of the
+// stored identifier.
+//
+// Example:
+//   URL  → https://res.cloudinary.com/<cloud>/raw/upload/v123/mentor_courses/abc.pdf
+//   ID   → mentor_courses/abc          (extension stripped)
+//
 const publicIdFromUrl = (url) => {
   try {
     const parts     = new URL(url).pathname.split("/");
     const uploadIdx = parts.indexOf("upload");
     if (uploadIdx === -1) return null;
     let rest = parts.slice(uploadIdx + 1);
-    if (/^v\d+$/.test(rest[0])) rest = rest.slice(1); // strip version segment
-    return rest.join("/");
+    if (/^v\d+$/.test(rest[0])) rest = rest.slice(1); // remove version segment
+    const full = rest.join("/");
+    // Strip the file extension — Cloudinary stores without it
+    return full.replace(/\.[^/.]+$/, "");
   } catch {
     return null;
   }
 };
 
-// ── MENTOR: Add a course (video or PDF) ──────────────────────────────────────
-// PDFs are uploaded as resource_type "image" → Cloudinary gives a PUBLIC URL.
-// This avoids the 401 that "raw" types return on restricted accounts.
+// ── MENTOR: Add a course ──────────────────────────────────────────────────────
+// PDFs are stored as resource_type "image" on Cloudinary.
+// When Cloudinary later delivers them, the signed URL uses format:"pdf".
 export const addCourse = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "File is required" });
 
     const { title, description, type } = req.body;
-    if (!title || !type) return res.status(400).json({ message: "Title and type are required" });
+    if (!title || !type)
+      return res.status(400).json({ message: "Title and type are required" });
 
     const isPdf = type === "pdf";
 
@@ -44,13 +54,16 @@ export const addCourse = async (req, res) => {
       resource_type: isPdf ? "image" : "auto",
     });
 
+    // Store the public_id WITHOUT extension (how Cloudinary internally indexes it)
+    const storedPublicId = (result.public_id || "").replace(/\.[^/.]+$/, "");
+
     const course = await Course.create({
       mentor:       req.user._id,
       title:        title.trim(),
       description:  description || "",
       type,
       fileUrl:      result.secure_url,
-      publicId:     result.public_id,
+      publicId:     storedPublicId,
       resourceType: isPdf ? "image" : (result.resource_type || "auto"),
       fileSize:     `${(req.file.size / (1024 * 1024)).toFixed(1)} MB`,
     });
@@ -62,14 +75,22 @@ export const addCourse = async (req, res) => {
   }
 };
 
-// ── SHARED: Return a pre-signed URL for PDF access ───────────────────────────
+// ── SHARED: Return a signed Cloudinary URL for a PDF ─────────────────────────
 // GET /api/courses/:id/pdf-url?disposition=inline|attachment
 //
-// Returns JSON  { success: true, url: "https://..." }
-// The frontend opens this URL with window.open() — no proxy, no piping.
+// Root causes of previous failures:
 //
-// For IMAGE-type PDFs (new):  cloudinary.url() signed delivery URL (publicly accessible).
-// For RAW-type PDFs (legacy): cloudinary.utils.api_sign_request() signed Admin-API download URL.
+//  1. Raw PDFs  — We were sending public_id WITH ".pdf" extension.
+//     Cloudinary stores the public_id WITHOUT the extension internally.
+//     Admin download requires public_id WITHOUT extension + format="pdf".
+//
+//  2. Image PDFs — We were passing `expires_at` to cloudinary.url().
+//     expires_at is only valid for type:"authenticated" resources.
+//     For type:"upload" resources, sign_url:true must be used WITHOUT expires_at.
+//
+// Fix for both: use cloudinary.utils.private_download_url(cleanId, "pdf", ...)
+//   which is the Admin-API download URL — always requires signature, always works
+//   regardless of account delivery settings.
 export const getPdfUrl = async (req, res) => {
   try {
     const course = await Course.findById(req.params.id);
@@ -78,61 +99,38 @@ export const getPdfUrl = async (req, res) => {
 
     const attachment = req.query.disposition === "attachment";
 
-    // Detect whether it was uploaded as image or raw
+    // Resolve clean public_id (always WITHOUT extension)
+    const rawId    = course.publicId || publicIdFromUrl(course.fileUrl);
+    const publicId = rawId ? rawId.replace(/\.[^/.]+$/, "") : null;
+    if (!publicId) return res.status(500).json({ message: "Cannot resolve public_id" });
+
+    // Detect resource type: raw (legacy uploads) vs image (new uploads)
     const isImageType =
       (course.resourceType && course.resourceType.startsWith("image")) ||
       course.fileUrl.includes("/image/upload/");
 
-    const publicId = course.publicId || publicIdFromUrl(course.fileUrl);
-    if (!publicId) return res.status(500).json({ message: "Cannot resolve public_id" });
+    const resourceType = isImageType ? "image" : "raw";
 
-    let url;
+    console.log(`[getPdfUrl] publicId="${publicId}" resourceType="${resourceType}" attachment=${attachment}`);
 
-    if (isImageType) {
-      // ── Image-type: signed delivery URL ───────────────────────────────────
-      // Cloudinary image-type PDFs are publicly accessible.
-      // Adding fl_attachment forces browser to save rather than display.
-      const opts = {
-        resource_type: "image",
-        type:          "upload",
-        sign_url:      true,
-        secure:        true,
-        expires_at:    Math.floor(Date.now() / 1000) + 300,
-      };
-      if (attachment) opts.flags = "attachment";
-      url = cloudinary.url(publicId, opts);
-    } else {
-      // ── Raw-type (legacy): Admin-API private download URL ─────────────────
-      // We build this using cloudinary.utils.api_sign_request which is
-      // available in cloudinary@1.41.3 and computes the correct HMAC-SHA1.
-      const ts        = Math.floor(Date.now() / 1000);
-      const expiresAt = ts + 300;
+    // private_download_url generates a signed Admin-API URL:
+    //   https://api.cloudinary.com/v1_1/{cloud}/{resourceType}/download
+    //     ?public_id={id_without_ext}&format=pdf&signature=...&api_key=...&timestamp=...
+    //
+    // This works even when the Cloudinary account restricts delivery URLs (401).
+    // It authenticates via HMAC-SHA1 signature — no Bearer token, no cookies.
+    //
+    // CRITICAL: Pass the public_id WITHOUT extension as first arg.
+    //           Pass "pdf" as the format (second arg) — this is the extension.
+    //           The SDK filters "" and undefined values, so format MUST be "pdf".
+    const url = cloudinary.utils.private_download_url(publicId, "pdf", {
+      resource_type: resourceType,
+      type:          "upload",
+      attachment:    attachment,
+      expires_at:    Math.floor(Date.now() / 1000) + 300, // 5-minute window
+    });
 
-      const sigParams = {
-        expires_at: expiresAt,
-        public_id:  publicId,
-        timestamp:  ts,
-        ...(attachment ? { attachment: "true" } : {}),
-      };
-
-      const signature = cloudinary.utils.api_sign_request(
-        sigParams,
-        process.env.CLOUDINARY_API_SECRET
-      );
-
-      const qs = new URLSearchParams({
-        public_id:  publicId,
-        api_key:    process.env.CLOUDINARY_API_KEY,
-        timestamp:  ts,
-        expires_at: expiresAt,
-        signature,
-        ...(attachment ? { attachment: "true" } : {}),
-      });
-
-      url = `https://api.cloudinary.com/v1_1/${process.env.CLOUDINARY_CLOUD_NAME}/raw/download?${qs}`;
-    }
-
-    console.log(`[getPdfUrl] isImageType=${isImageType} attachment=${attachment} publicId=${publicId}`);
+    console.log(`[getPdfUrl] url=${url.split("?")[0]}`);
     res.json({ success: true, url });
   } catch (err) {
     console.error("[getPdfUrl] error:", err.message);
