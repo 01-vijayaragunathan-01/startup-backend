@@ -10,10 +10,12 @@ const courseSchema = new mongoose.Schema(
     title:       { type: String, required: true, trim: true },
     description: { type: String, default: "" },
     type:        { type: String, enum: ["video", "pdf"], required: true },
-    fileUrl:     { type: String, required: true },   // Cloudinary secure URL
-    thumbnailUrl:{ type: String, default: "" },      // optional video thumbnail
-    duration:    { type: String, default: "" },      // e.g. "12:34"
-    fileSize:    { type: String, default: "" },      // e.g. "4.2 MB"
+    fileUrl:      { type: String, required: true },   // Cloudinary secure URL
+    publicId:     { type: String, default: "" },      // Cloudinary public_id (for signing)
+    resourceType: { type: String, default: "auto" },  // Cloudinary resource_type
+    thumbnailUrl: { type: String, default: "" },      // optional video thumbnail
+    duration:     { type: String, default: "" },      // e.g. "12:34"
+    fileSize:     { type: String, default: "" },      // e.g. "4.2 MB"
   },
   { timestamps: true }
 );
