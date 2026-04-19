@@ -66,7 +66,9 @@ export const addCourse = async (req, res) => {
       type,
       fileUrl:      result.secure_url,
       publicId:     storedPublicId,
-      resourceType: isPdf ? "image" : (result.resource_type || "auto"),
+      // Store the ACTUAL resource_type Cloudinary used (not what we requested).
+      // "auto" uploads: PDFs → "raw", videos → "video"
+      resourceType: result.resource_type || "raw",
       fileSize:     `${(req.file.size / (1024 * 1024)).toFixed(1)} MB`,
     });
 
@@ -106,23 +108,25 @@ export const getPdfUrl = async (req, res) => {
     const publicId = rawId ? rawId.replace(/\.[^/.]+$/, "") : null;
     if (!publicId) return res.status(500).json({ message: "Cannot resolve public_id" });
 
-    // Detect resource type from the stored URL
-    // After switching to resource_type:"auto", all non-video study materials
-    // (PDF, PPT, DOC etc.) are stored as "raw" by Cloudinary.
-    const isImageType =
-      (course.resourceType && course.resourceType.startsWith("image")) ||
-      course.fileUrl.includes("/image/upload/");
-
+    // ── Derive resource type from the fileUrl path — this is the SOURCE OF TRUTH.
+    //
+    // Cloudinary embeds the resource type in the delivery URL:
+    //   /image/upload/ → image type (old uploads forced as image)
+    //   /raw/upload/   → raw type  (all new "auto" uploads for PDF/PPT/DOC)
+    //   /video/upload/ → video type
+    //
+    // Do NOT rely on course.resourceType in MongoDB — it may be stale/wrong
+    // (e.g. stored as "image" when Cloudinary actually saved it as "raw").
+    const isImageType  = course.fileUrl.includes("/image/upload/");
     const resourceType = isImageType ? "image" : "raw";
 
-    // Derive the file format from the original URL extension
-    // e.g. ".pdf" → "pdf", ".pptx" → "pptx", ".docx" → "docx"
+    // Derive the file extension from the original URL
     const urlExt = course.fileUrl.split("?")[0].split(".").pop().toLowerCase();
     const format = ["pdf","pptx","ppt","docx","doc","xlsx","xls"].includes(urlExt)
       ? urlExt
-      : "pdf"; // fallback
+      : "pdf"; // safe fallback
 
-    console.log(`[getPdfUrl] publicId="${publicId}" resourceType="${resourceType}" format="${format}" attachment=${attachment}`);
+    console.log(`[getPdfUrl] id=${req.params.id} resourceType=${resourceType} format=${format} attachment=${attachment} publicId=${publicId}`);
 
     // private_download_url generates a signed Admin-API URL:
     //   https://api.cloudinary.com/v1_1/{cloud}/{resourceType}/download
